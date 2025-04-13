@@ -2,20 +2,25 @@
 #define OTA_TASK_H
 
 #include <Arduino.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <Update.h>
+#include <ArduinoJson.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
-#include "../ota/ota_client.h"
 
-class OTATask {
-public:
-    static void start(const char* apiKey, const char* productId);
-    static void stop();
+// OTA parameters
+extern const char* OTA_API_KEY;
+extern const char* FIRMWARE_VERSION;
+extern const char* DEVICE_ID;
+extern const uint32_t OTA_CHECK_INTERVAL;
 
-private:
-    static void taskFunction(void* parameter);
-    static TaskHandle_t taskHandle;
-    static OTAClient* otaClient;
-    static const uint32_t CHECK_INTERVAL = 300000; // 5 minutes
-};
+// Task handle
+extern TaskHandle_t otaTaskHandle;
 
-#endif
+// Function declarations
+void otaTask(void * parameter);
+bool checkForUpdates();
+bool handleOTAUpdate(const char* firmware_url, int expectedSize);
+
+#endif // OTA_TASK_H

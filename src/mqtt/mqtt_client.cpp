@@ -4,49 +4,89 @@
 // Global instance for callback
 static MQTTClient* instance = nullptr;
 
+// MQTT connection parameters
+const int MAX_MQTT_RETRIES = 5;
+const int MQTT_RETRY_DELAY = 5000; // 5 seconds
+
 MQTTClient::MQTTClient()
     : mqttClient(espClient) {
     last_data_send_time = 0;
     sim_temperature = 25.0;
     sim_humidity = 50.0;
+    connectionAttempts = 0;
 
     // Initialize schedule manager
-    scheduleManager.begin();
+    if (!scheduleManager.begin()) {
+        Serial.println("Failed to initialize schedule manager");
+    }
 }
 
 void MQTTClient::begin() {
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
     mqttClient.setCallback(mqttCallback);
     instance = this;
-    connect();
+
+    if (!connect()) {
+        Serial.println("Failed to establish initial MQTT connection");
+    }
 }
 
-void MQTTClient::connect() {
-    while (!mqttClient.connected()) {
-        Serial.print("Attempting MQTT connection...");
-        if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_ACCESS_TOKEN, NULL)) {
-            Serial.println("connected");
-            mqttClient.subscribe(TOPIC_RPC_REQUEST);
-            mqttClient.subscribe(TOPIC_ATTRIBUTES_RESPONSE);
+bool MQTTClient::connect() {
+    if (connectionAttempts >= MAX_MQTT_RETRIES) {
+        Serial.println("Maximum MQTT connection attempts reached");
+        return false;
+    }
 
-            // Request shared attributes
-            StaticJsonDocument<200> doc;
-            doc["sharedKeys"] = "schedule";
-            String payload;
-            serializeJson(doc, payload);
-            mqttClient.publish(TOPIC_ATTRIBUTES_REQUEST, payload.c_str());
-        } else {
-            Serial.print("failed, rc=");
-            Serial.print(mqttClient.state());
-            Serial.println(" try again in 5 seconds");
-            delay(5000);
+    Serial.print("Attempting MQTT connection... (");
+    Serial.print(connectionAttempts + 1);
+    Serial.print("/");
+    Serial.print(MAX_MQTT_RETRIES);
+    Serial.println(")");
+
+    if (mqttClient.connect(MQTT_CLIENT_ID, MQTT_ACCESS_TOKEN, NULL)) {
+        Serial.println("MQTT connected");
+        connectionAttempts = 0;
+
+        // Subscribe to topics
+        if (!mqttClient.subscribe(TOPIC_RPC_REQUEST)) {
+            Serial.println("Failed to subscribe to RPC topic");
+            return false;
         }
+        if (!mqttClient.subscribe(TOPIC_ATTRIBUTES_RESPONSE)) {
+            Serial.println("Failed to subscribe to attributes topic");
+            return false;
+        }
+
+        // Request shared attributes
+        StaticJsonDocument<200> doc;
+        doc["sharedKeys"] = "schedule";
+        String payload;
+        serializeJson(doc, payload);
+        if (!mqttClient.publish(TOPIC_ATTRIBUTES_REQUEST, payload.c_str())) {
+            Serial.println("Failed to publish attributes request");
+            return false;
+        }
+
+        return true;
+    } else {
+        Serial.print("MQTT connection failed, rc=");
+        Serial.print(mqttClient.state());
+        Serial.println(" try again in 5 seconds");
+        connectionAttempts++;
+        delay(MQTT_RETRY_DELAY);
+        return false;
     }
 }
 
 void MQTTClient::reconnect() {
     if (!mqttClient.connected()) {
-        connect();
+        if (!connect()) {
+            Serial.println("Failed to reconnect to MQTT");
+            if (connectionAttempts >= MAX_MQTT_RETRIES) {
+                Serial.println("Restarting ESP32 due to MQTT connection failure");
+                ESP.restart();
+            }
+        }
     }
 }
 
@@ -114,19 +154,40 @@ void MQTTClient::handleAttributes(const char* message) {
     DeserializationError error = deserializeJson(doc, message);
 
     if (error) {
-        Serial.println("Failed to parse attributes message");
+        Serial.print("Failed to parse attributes message: ");
+        Serial.println(error.c_str());
         return;
     }
 
     JsonObject shared = doc["shared"];
     if (shared.containsKey("schedule")) {
         JsonObject scheduleObj = shared["schedule"];
+
+        // Validate schedule data
+        if (!scheduleObj.containsKey("off_time") ||
+            !scheduleObj.containsKey("on_time") ||
+            !scheduleObj.containsKey("schedule_on") ||
+            !scheduleObj.containsKey("schedule_off")) {
+            Serial.println("Invalid schedule data received");
+            return;
+        }
+
         Schedule newSchedule;
         newSchedule.off_time = scheduleObj["off_time"];
         newSchedule.on_time = scheduleObj["on_time"];
         newSchedule.schedule_on = scheduleObj["schedule_on"];
         newSchedule.schedule_off = scheduleObj["schedule_off"];
-        scheduleManager.updateSchedule(newSchedule);
+
+        // Additional validation
+        if (newSchedule.off_time < 0 || newSchedule.off_time > 23 ||
+            newSchedule.on_time < 0 || newSchedule.on_time > 23) {
+            Serial.println("Invalid time values in schedule");
+            return;
+        }
+
+        if (!scheduleManager.updateSchedule(newSchedule)) {
+            Serial.println("Failed to update schedule");
+        }
     }
 }
 

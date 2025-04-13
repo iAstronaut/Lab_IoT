@@ -1,7 +1,6 @@
 #include <Arduino.h>
 #include "task.h"
-#include "ota.h"
-#include "ota_server_task.h"
+
 
 // Task priorities
 #define WIFI_TASK_PRIORITY 3

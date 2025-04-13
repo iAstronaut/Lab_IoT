@@ -22,9 +22,45 @@ const char* password = "YOUR_WIFI_PASSWORD";
 const char* otadriveApiKey = "85e7d3e5-05ab-46ad-bd6b-fbbe3492491f";
 const char* otadriveProductId = "34000";
 
+// WiFi connection parameters
+const int MAX_WIFI_RETRIES = 10;
+const int WIFI_RETRY_DELAY = 5000; // 5 seconds
+
+bool connectToWiFi() {
+    int retryCount = 0;
+
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED && retryCount < MAX_WIFI_RETRIES) {
+        delay(WIFI_RETRY_DELAY);
+        Serial.print("Attempting WiFi connection... (");
+        Serial.print(retryCount + 1);
+        Serial.print("/");
+        Serial.print(MAX_WIFI_RETRIES);
+        Serial.println(")");
+        retryCount++;
+    }
+
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("Failed to connect to WiFi after maximum retries");
+        return false;
+    }
+
+    Serial.println("\nWiFi connected");
+    Serial.println("IP address: ");
+    Serial.println(WiFi.localIP());
+    return true;
+}
+
 void setup() {
     Serial.begin(115200);
-    // Wire.begin(I2C_SDA, I2C_SCL);  // Initialize I2C with specific pins
+    Serial.println("Starting setup...");
+
+    // Initialize WiFi with retry mechanism
+    if (!connectToWiFi()) {
+        Serial.println("Failed to initialize WiFi. Restarting in 5 seconds...");
+        delay(5000);
+        ESP.restart();
+    }
 
     // Initialize DHT20
     // if (!DHT.begin()) {
@@ -33,31 +69,36 @@ void setup() {
     // }
     // Serial.println("DHT20 sensor initialized.");
 
-    // Initialize WiFi
-    WiFi.begin(ssid, password);
-    while (WiFi.status() != WL_CONNECTED) {
-        delay(500);
-        Serial.print(".");
-    }
-    Serial.println("\nWiFi connected");
-    Serial.println("IP address: ");
-    Serial.println(WiFi.localIP());
-
-    // Initialize MQTT
-    // initializeMQTT();
-
-    // Create Tasks (task.cpp will handle this)
+    // Create Tasks
     createTasks();
 
     // Start OTA task
-    OTATask::start(otadriveApiKey, otadriveProductId);
+    if (!OTATask::start(otadriveApiKey, otadriveProductId)) {
+        Serial.println("Failed to start OTA task");
+    }
 
     // Start schedule task
-    ScheduleTask::start();
-    MQTTTask::start();
+    if (!ScheduleTask::start()) {
+        Serial.println("Failed to start Schedule task");
+    }
+
+    // Start MQTT task
+    if (!MQTTTask::start()) {
+        Serial.println("Failed to start MQTT task");
+    }
+
+    Serial.println("Setup completed successfully");
 }
 
 void loop() {
-    // Main loop is empty as we're using FreeRTOS tasks
+    // Check WiFi connection periodically
+    if (WiFi.status() != WL_CONNECTED) {
+        Serial.println("WiFi connection lost. Attempting to reconnect...");
+        if (!connectToWiFi()) {
+            Serial.println("Failed to reconnect to WiFi. Restarting...");
+            ESP.restart();
+        }
+    }
+
     delay(1000);
 }
