@@ -14,16 +14,17 @@ MQTTClient::MQTTClient()
     sim_temperature = 25.0;
     sim_humidity = 50.0;
     connectionAttempts = 0;
+    power_state = true;
 
     // Initialize schedule manager
-    if (!scheduleManager.begin()) {
-        Serial.println("Failed to initialize schedule manager");
-    }
+    scheduleManager.begin();
 }
 
 void MQTTClient::begin() {
     mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
-    mqttClient.setCallback(mqttCallback);
+    mqttClient.setCallback([this](char* topic, uint8_t* payload, unsigned int length) {
+        this->callback(topic, payload, length);
+    });
     instance = this;
 
     if (!connect()) {
@@ -90,13 +91,7 @@ void MQTTClient::reconnect() {
     }
 }
 
-void MQTTClient::mqttCallback(char* topic, byte* payload, unsigned int length) {
-    if (instance) {
-        instance->callback(topic, payload, length);
-    }
-}
-
-void MQTTClient::callback(char* topic, byte* payload, unsigned int length) {
+void MQTTClient::callback(char* topic, uint8_t* payload, unsigned int length) {
     char message[length + 1];
     memcpy(message, payload, length);
     message[length] = '\0';
@@ -133,7 +128,7 @@ void MQTTClient::handleRPC(const char* requestId, const char* message) {
         response["humidity"] = sim_humidity;
     }
     else if (strcmp(method, "setPowerState") == 0) {
-        bool newState = params.as<bool>();
+        bool newState = params["value"] | false;
         ScheduleTask::setPowerState(newState);
         response["power"] = newState;
     }
@@ -203,7 +198,7 @@ void MQTTClient::generateSensorData() {
 void MQTTClient::sendTelemetryData(bool forceSend) {
     unsigned long current_time = millis();
 
-    if ((ScheduleTask::getPowerState() || forceSend) && (current_time - last_data_send_time >= 60000)) {
+    if ((ScheduleTask::getPowerState() || forceSend) && (current_time - last_data_send_time >= 15000)) {
         if (ScheduleTask::getPowerState()) {
             generateSensorData();
         } else {

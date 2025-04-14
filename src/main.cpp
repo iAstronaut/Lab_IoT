@@ -14,14 +14,6 @@
 #define I2C_SDA 11  // Change to match your hardware
 #define I2C_SCL 12  // Change to match your hardware
 
-// WiFi credentials
-const char* ssid = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
-
-// OTADrive credentials
-const char* otadriveApiKey = "85e7d3e5-05ab-46ad-bd6b-fbbe3492491f";
-const char* otadriveProductId = "34000";
-
 // WiFi connection parameters
 const int MAX_WIFI_RETRIES = 10;
 const int WIFI_RETRY_DELAY = 5000; // 5 seconds
